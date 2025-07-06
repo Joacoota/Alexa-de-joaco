@@ -1,74 +1,91 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import openai
-import requests
-import io
-import wave
+import tempfile
+import os
+import whisper
 
+# Inicializar Flask
 app = Flask(__name__)
-CORS(app)  # Habilita CORS para todas las rutas
+CORS(app)
 
-# Tu clave API de OpenAI (la que proporcionaste)
-openai.api_key = "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"
+# Tu clave de OpenAI (se recomienda usar variable de entorno)
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Configuración del servidor de TTS (VoiceRSS)
-TTS_API_KEY = '45f4a3eee38f402eae96e53f8a3777d5'
+# Cargar modelo Whisper (usa "base" para menos uso de RAM en Railway)
+whisper_model = whisper.load_model("base")
 
-@app.route('/')
-def hello_world():
+@app.route("/")
+def inicio():
     return "Servidor de Mi Alexa - funcionando 🚀"
 
-@app.route('/stt', methods=['POST'])
+@app.route("/stt", methods=["POST"])
 def stt():
-    audio_file = request.data  # El archivo de audio viene directamente en el cuerpo de la solicitud
+    if request.data:
+        try:
+            # Guardar archivo temporalmente
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                f.write(request.data)
+                f.flush()
+                audio_path = f.name
 
-    # Convierte los datos binarios a un formato adecuado para enviar a OpenAI Whisper
-    audio = io.BytesIO(audio_file)
-    
-    # Llamada a la API de OpenAI Whisper para transcripción de voz a texto
-    try:
-        transcript = openai.Audio.transcribe("whisper-1", audio)
-        return jsonify({"transcription": transcript['text']})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+            # Transcribir con Whisper
+            result = whisper_model.transcribe(audio_path)
+            texto = result["text"]
+            os.remove(audio_path)  # limpiar
 
-@app.route('/chat', methods=['POST'])
+            return jsonify({"texto": texto})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    return jsonify({"error": "No se recibió audio"}), 400
+
+@app.route("/chat", methods=["POST"])
 def chat():
-    data = request.json
-    user_message = data.get('mensaje')
+    data = request.get_json()
+    mensaje = data.get("mensaje", "")
+    if not mensaje:
+        return jsonify({"error": "Falta el mensaje"}), 400
 
-    if not user_message:
-        return jsonify({"error": "No message received"}), 400
-
-    # Llamada a la API de OpenAI GPT-3.5 para generar la respuesta
     try:
-        response = openai.Completion.create(
-            engine="gpt-3.5-turbo", 
-            prompt=user_message,
-            max_tokens=150
+        respuesta = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": mensaje}]
         )
-        return jsonify({"respuesta": response.choices[0].text.strip()})
+        texto = respuesta.choices[0].message.content.strip()
+        return jsonify(texto)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/tts', methods=['POST'])
+@app.route("/tts", methods=["POST"])
 def tts():
-    data = request.json
-    text = data.get('texto')
+    data = request.get_json()
+    texto = data.get("texto", "")
+    if not texto:
+        return jsonify({"error": "Falta el texto"}), 400
 
-    if not text:
-        return jsonify({"error": "No text received"}), 400
+    # VoiceRSS API
+    key = os.getenv("VOICERSS_KEY")
+    if not key:
+        return jsonify({"error": "Falta la clave de VoiceRSS"}), 500
 
-    # Solicitar al servicio TTS (VoiceRSS) la conversión de texto a audio
+    import requests
     try:
-        url = f"http://api.voicerss.org/?key={TTS_API_KEY}&hl=en-us&src={text}&c=MP3"
-        audio_data = requests.get(url).content
-
-        # Guarda el audio en memoria
-        audio = io.BytesIO(audio_data)
-        return audio.getvalue()
+        params = {
+            "key": key,
+            "hl": "es-mx",
+            "src": texto,
+            "c": "MP3",
+            "f": "44khz_16bit_stereo"
+        }
+        response = requests.get("https://api.voicerss.org/", params=params)
+        if response.status_code == 200:
+            # Guardar en archivo temporal y devolver URL
+            filename = "respuesta.mp3"
+            with open(filename, "wb") as f:
+                f.write(response.content)
+            return jsonify(f"http://{request.host}/{filename}")
+        else:
+            return jsonify({"error": "Error en VoiceRSS"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
