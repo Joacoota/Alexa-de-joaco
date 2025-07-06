@@ -1,84 +1,74 @@
-
-import os
-import wave
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 import openai
 import requests
-from flask import Flask, request, jsonify
-from pydub import AudioSegment
+import io
+import wave
 
-# --- Configuración de OpenAI ---
-openai.api_key = "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"  # Coloca tu clave aquí
-
-# --- Flask Setup ---
 app = Flask(__name__)
+CORS(app)  # Habilita CORS para todas las rutas
 
-# Ruta para recibir el audio WAV y convertirlo a texto (STT)
-@app.route("/stt", methods=["POST"])
+# Tu clave API de OpenAI (la que proporcionaste)
+openai.api_key = "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"
+
+# Configuración del servidor de TTS (VoiceRSS)
+TTS_API_KEY = '45f4a3eee38f402eae96e53f8a3777d5'
+
+@app.route('/')
+def hello_world():
+    return "Servidor de Mi Alexa - funcionando 🚀"
+
+@app.route('/stt', methods=['POST'])
 def stt():
-    try:
-        # Recibir el archivo de audio
-        audio_file = request.data
-        with open("audio.wav", "wb") as f:
-            f.write(audio_file)
+    audio_file = request.data  # El archivo de audio viene directamente en el cuerpo de la solicitud
 
-        # Usar la API de Whisper para convertir a texto
-        audio = open("audio.wav", "rb")
+    # Convierte los datos binarios a un formato adecuado para enviar a OpenAI Whisper
+    audio = io.BytesIO(audio_file)
+    
+    # Llamada a la API de OpenAI Whisper para transcripción de voz a texto
+    try:
         transcript = openai.Audio.transcribe("whisper-1", audio)
-        text = transcript['text']
-
-        return jsonify(text=text)
+        return jsonify({"transcription": transcript['text']})
     except Exception as e:
-        print(f"Error en STT: {e}")
-        return jsonify(error="Error procesando el audio"), 500
+        return jsonify({"error": str(e)}), 500
 
-# Ruta para recibir el mensaje de texto, obtener la respuesta IA y convertirla a audio
-@app.route("/chat", methods=["POST"])
+@app.route('/chat', methods=['POST'])
 def chat():
-    try:
-        data = request.get_json()
-        user_message = data['mensaje']
+    data = request.json
+    user_message = data.get('mensaje')
 
-        # Consulta a OpenAI para obtener una respuesta
+    if not user_message:
+        return jsonify({"error": "No message received"}), 400
+
+    # Llamada a la API de OpenAI GPT-3.5 para generar la respuesta
+    try:
         response = openai.Completion.create(
-            engine="gpt-3.5-turbo",
+            engine="gpt-3.5-turbo", 
             prompt=user_message,
             max_tokens=150
         )
-        answer = response.choices[0].text.strip()
-
-        return jsonify(text=answer)
+        return jsonify({"respuesta": response.choices[0].text.strip()})
     except Exception as e:
-        print(f"Error en Chat: {e}")
-        return jsonify(error="Error procesando la respuesta"), 500
+        return jsonify({"error": str(e)}), 500
 
-# Ruta para convertir texto en voz (TTS) y devolver la URL del archivo MP3
-@app.route("/tts", methods=["POST"])
+@app.route('/tts', methods=['POST'])
 def tts():
+    data = request.json
+    text = data.get('texto')
+
+    if not text:
+        return jsonify({"error": "No text received"}), 400
+
+    # Solicitar al servicio TTS (VoiceRSS) la conversión de texto a audio
     try:
-        data = request.get_json()
-        text = data["texto"]
+        url = f"http://api.voicerss.org/?key={TTS_API_KEY}&hl=en-us&src={text}&c=MP3"
+        audio_data = requests.get(url).content
 
-        # Usar un servicio TTS como VoiceRSS para convertir el texto en MP3
-        tts_url = f"http://api.voicerss.org/?key=tu_clave_api_voicerss&hl=es-es&src={text}"
-        response = requests.get(tts_url)
-
-        if response.status_code == 200:
-            with open("response.mp3", "wb") as f:
-                f.write(response.content)
-
-            # Devolver la URL del archivo MP3 generado
-            return jsonify(url="https://<tu-url-publica>.railway.app/response.mp3")
-
-        return jsonify(error="Error generando el TTS"), 500
+        # Guarda el audio en memoria
+        audio = io.BytesIO(audio_data)
+        return audio.getvalue()
     except Exception as e:
-        print(f"Error en TTS: {e}")
-        return jsonify(error="Error procesando el texto"), 500
+        return jsonify({"error": str(e)}), 500
 
-# Ruta para servir el archivo MP3 generado
-@app.route("/response.mp3")
-def serve_mp3():
-    return send_file("response.mp3", mimetype="audio/mp3")
-
-# Iniciar el servidor Flask
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
