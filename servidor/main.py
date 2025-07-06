@@ -9,7 +9,7 @@ app = Flask(__name__)
 CORS(app)
 
 # Cargar modelo Whisper solo una vez
-modelo = whisper.load_model("base")
+modelo = None
 
 @app.route("/")
 def inicio():
@@ -56,5 +56,6 @@ def tts():
     url = f"https://api.voicerss.org/?key=YOUR_API_KEY&hl=es-mx&src={texto}"
     return jsonify(url)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(host='0.0.0.0', port=8080)
+
