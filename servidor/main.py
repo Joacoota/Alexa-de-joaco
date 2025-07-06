@@ -6,75 +6,74 @@ import os
 app = Flask(__name__)
 CORS(app)
 
-OPENAI_API_KEY = os.getenv("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")  # ← Tu clave debe estar como variable de entorno
+# Claves (configurá estas en Railway como Variables de Entorno)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+VOICERSS_KEY   = os.getenv("VOICERSS_KEY")
 
 @app.route("/")
-def inicio():
-    return "Servidor de Mi Alexa - funcionando 🚀"
+def home():
+    return "Servidor de Mi Alexa 🎙️"
 
 @app.route("/stt", methods=["POST"])
-def transcribir_audio():
-    try:
-        audio = request.data
-        if not audio:
-            return jsonify({"error": "No se recibió audio"}), 400
-
-        headers = {
-            "Authorization": f"Bearer {OPENAI_API_KEY}"
-        }
-        files = {
-            "file": ("audio.wav", audio, "audio/wav")
-        }
-        data = {
-            "model": "whisper-1",
-            "language": "es"
-        }
-        response = requests.post("https://api.openai.com/v1/audio/transcriptions",
-                                 headers=headers, files=files, data=data)
-
-        if response.status_code != 200:
-            return jsonify({"error": response.text}), 400
-
-        texto = response.json().get("text", "")
-        return texto
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/chat", methods=["POST"])
-def responder_chat():
-    data = request.json
-    mensaje = data.get("mensaje", "")
-    if not mensaje:
-        return jsonify({"error": "Mensaje vacío"}), 400
+def stt():
+    audio = request.data
+    if not audio:
+        return jsonify({"error": "No se recibió audio"}), 400
 
     headers = {
         "Authorization": f"Bearer {OPENAI_API_KEY}"
     }
+    files = {
+        "file": ("audio.wav", audio, "audio/wav"),
+        "model": (None, "whisper-1")
+    }
+    response = requests.post("https://api.openai.com/v1/audio/transcriptions", headers=headers, files=files)
+    
+    if response.ok:
+        return response.json()["text"]
+    return jsonify({"error": response.text}), response.status_code
+
+@app.route("/chat", methods=["POST"])
+def chat():
+    data = request.json
+    prompt = data.get("mensaje", "")
+    if not prompt:
+        return jsonify({"error": "Falta mensaje"}), 400
+
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json"
+    }
     json_data = {
         "model": "gpt-3.5-turbo",
-        "messages": [{"role": "user", "content": mensaje}]
+        "messages": [{"role": "user", "content": prompt}]
     }
-    response = requests.post("https://api.openai.com/v1/chat/completions",
-                             headers=headers, json=json_data)
-    if response.status_code != 200:
-        return jsonify({"error": response.text}), 400
+    response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=json_data)
 
-    return response.json()["choices"][0]["message"]["content"]
+    if response.ok:
+        return response.json()["choices"][0]["message"]["content"]
+    return jsonify({"error": response.text}), response.status_code
 
 @app.route("/tts", methods=["POST"])
-def sintetizar_audio():
-    from urllib.parse import quote
+def tts():
     data = request.json
     texto = data.get("texto", "")
     if not texto:
-        return jsonify({"error": "Texto vacío"}), 400
+        return jsonify({"error": "Falta texto"}), 400
 
-    VOICERSS_KEY = os.getenv("VOICERSS_KEY")  # ← clave TTS
-    if not VOICERSS_KEY:
-        return jsonify({"error": "Falta clave de VoiceRSS"}), 500
-
-    url = f"https://api.voicerss.org/?key={VOICERSS_KEY}&hl=es-mx&src={quote(texto)}&c=MP3&f=16khz_16bit_mono"
-    return url
+    params = {
+        "key": VOICERSS_KEY,
+        "hl": "es-ar",
+        "src": texto,
+        "c": "MP3",
+        "f": "44khz_16bit_stereo"
+    }
+    response = requests.get("https://api.voicerss.org/", params=params)
+    
+    if response.ok and b'Audio' not in response.content:
+        # Railway requiere que sea una URL, así que podés hacer que ESP32 lea de esta misma ruta /stream.mp3
+        return jsonify({"url": response.url})
+    return jsonify({"error": "TTS falló"}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
