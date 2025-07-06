@@ -16,22 +16,28 @@ def home():
 
 @app.route("/stt", methods=["POST"])
 def stt():
-    audio = request.data
-    if not audio:
-        return jsonify({"error": "No se recibió audio"}), 400
+    try:
+        # Verifica si hay archivo de audio
+        audio = request.get_data()
+        if not audio:
+            return jsonify({"error": "No audio received"}), 400
 
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}"
-    }
-    files = {
-        "file": ("audio.wav", audio, "audio/wav"),
-        "model": (None, "whisper-1")
-    }
-    response = requests.post("https://api.openai.com/v1/audio/transcriptions", headers=headers, files=files)
-    
-    if response.ok:
-        return response.json()["text"]
-    return jsonify({"error": response.text}), response.status_code
+        headers = {
+            "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}"
+        }
+        files = {
+            "file": ("audio.wav", audio, "audio/wav"),
+            "model": (None, "whisper-1")
+        }
+        response = requests.post("https://api.openai.com/v1/audio/transcriptions",
+                                 headers=headers, files=files)
+        if response.ok:
+            text = response.json()["text"]
+            return text
+        return jsonify({"error": response.text}), response.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/chat", methods=["POST"])
 def chat():
