@@ -1,4 +1,5 @@
-from flask import Flask, request, jsonify, Response
+# main.py
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
 import os
@@ -8,6 +9,10 @@ CORS(app)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 VOICERSS_KEY   = os.getenv("VOICERSS_KEY")
+
+# DEBUG: mostrar parte de la clave para confirmar que está cargada
+print("🔑 OPENAI_API_KEY:", OPENAI_API_KEY[:5] + "..." if OPENAI_API_KEY else "❌ NO CARGADA")
+
 
 @app.route("/")
 def home():
